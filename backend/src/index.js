@@ -1,6 +1,9 @@
 const { validateEnv } = require("./env");
 const path = require("path");
 const lti = require("ltijs").Provider;
+const mongoose = require("mongoose");
+const dotenv = require('dotenv')
+dotenv.config()
 const routes = require("./routes");
 const isDev = process.env.NODE_ENV !== "production";
 const publicPath = path.join(__dirname, "../public");
@@ -51,6 +54,14 @@ lti.onDeepLinking(async (token, req, res) => {
 lti.app.use(routes);
 
 const setup = async () => {
+  // Initialize mongoose connection for image storage
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log('MongoDB connected successfully for image storage');
+  } catch (error) {
+    console.error('MongoDB connection error:', error);
+  }
+
   await lti.deploy({ port: process.env.PORT });
   await lti.registerPlatform({
     url: process.env.PLATFORM_URL,

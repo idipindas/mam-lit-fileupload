@@ -1,6 +1,7 @@
 const lti = require("ltijs").Provider;
 const axios = require("axios");
 const { fetchImageBuffer, handleError } = require("../utils/common.utils");
+const ImageStorage = require("../models/image-storage.model");
 
 const publicInsertController = async (req, res) => {
   let moduleId, topicId;
@@ -136,7 +137,56 @@ const publicInsertController = async (req, res) => {
     console.log(`Successfully created topic with ID: ${topicId}`);
     console.log(`Persistent D2L Image URL is: ${d2lImageUrl}`);
 
-    // --- Step 4: HTML output and Deep Linking ---
+    // --- Step 4: Save image storage record ---
+    try {
+      // Get user ID from LTI context
+      const userId = res.locals.context?.user?.id || res.locals.context?.userId || 'unknown';
+      
+      // Parse Mayo image data from session storage or request
+      const mayoImageData = {
+        mayoImageId: imageId || `mayo_${Date.now()}`,
+        mayoImageTitle: title || 'Untitled Image',
+        mayoThumbnailUrl: decodedImageUrl, // Using full URL as thumbnail for now
+        mayoFullImageUrl: decodedImageUrl,
+        mayoImageWidth: null, // Could be extracted from image buffer if needed
+        mayoImageHeight: null,
+        mayoCreateDate: new Date().toISOString()
+      };
+
+      const imageStorageData = {
+        ...mayoImageData,
+        d2lImageUrl,
+        d2lOrgUnitId: orgUnitId,
+        d2lModuleId: moduleId,
+        d2lTopicId: topicId,
+        d2lFileName: fileName,
+        d2lFilePath: d2lPath,
+        insertedBy: userId,
+        altText: altText || '',
+        isDecorative: isDecorativeFlag,
+        title: title || mayoImageData.mayoImageTitle,
+        contentType,
+        fileSize: buffer.length,
+        tags: []
+      };
+
+      // Check if image already exists
+      const existingImage = await ImageStorage.findByMayoId(mayoImageData.mayoImageId, orgUnitId);
+      
+      if (existingImage) {
+        await existingImage.incrementUsage();
+        console.log(`Updated usage count for existing image: ${existingImage._id}`);
+      } else {
+        const imageStorage = new ImageStorage(imageStorageData);
+        const savedImage = await imageStorage.save();
+        console.log(`Saved new image storage record: ${savedImage._id}`);
+      }
+    } catch (storageError) {
+      console.error('Error saving image storage record:', storageError);
+      // Don't fail the entire operation if storage fails
+    }
+
+    // --- Step 5: HTML output and Deep Linking ---
     let htmlAttrs = `height="auto" width="600px" src="${d2lImageUrl}"`;
     const isDecorativeFlag =
       isDecorative === true ||
