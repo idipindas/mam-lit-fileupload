@@ -2,8 +2,11 @@ const lti = require("ltijs").Provider;
 const axios = require("axios");
 const { fetchImageBuffer, handleError } = require("../utils/common.utils");
 const { logDecodedJwt } = require("../jwtLogger");
+// ======= CHANGE: Import the ImageUploadModel =======
+const { ImageUploadModel } = require("../model/image-upload-model");
 
 const publicInsertController = async (req, res) => {
+  console.log("======lti K ======", req?.params);
   let moduleId, topicId;
   let orgUnitId;
   try {
@@ -13,6 +16,49 @@ const publicInsertController = async (req, res) => {
     }
     const decodedImageUrl = decodeURIComponent(imageUrl);
     console.log(`Decoded Image URL for fetch: ${decodedImageUrl}`);
+
+    // ======= CHANGE: Check MongoDB for existing image by imageId =======
+    const existingImage = await ImageUploadModel.findOne({ imageId });
+    if (existingImage) {
+      console.log("Image found in DB, skipping Mayo/D2L upload.");
+      // Build HTML and Deep Linking as before, using existingImage.d2lImageUrl
+      let htmlAttrs = `height="auto" width="600px" src="${existingImage.d2lImageUrl}"`;
+      const isDecorativeFlag =
+        isDecorative === true ||
+        (typeof isDecorative === "string" &&
+          isDecorative.toLowerCase() === "true");
+      if (isDecorativeFlag) {
+        htmlAttrs += ' alt="" role="presentation"';
+      } else {
+        htmlAttrs += ` alt="${altText}"`;
+      }
+      const finalHtmlFragment = `
+      <img ${htmlAttrs}>`;
+      const items = [
+        {
+          type: "html",
+          html: finalHtmlFragment,
+          title: title,
+          text: title,
+        },
+      ];
+      const jwt = await lti.DeepLinking.createDeepLinkingMessage(
+        res.locals.token,
+        items,
+        {
+          message: "Successfully registered resource!",
+        }
+      );
+      logDecodedJwt("Deep Linking Response", jwt, "response");
+      const formHtml = await lti.DeepLinking.createDeepLinkingForm(
+        res.locals.token,
+        items,
+        { message: "Image inserted successfully into D2L!" }
+      );
+      return formHtml ? res.send(formHtml) : res.sendStatus(500);
+    }
+    // ======= END CHANGE =======
+
     if (
       !res.locals.context ||
       !res.locals.context.context ||
@@ -136,6 +182,17 @@ const publicInsertController = async (req, res) => {
     const d2lImageUrl = topicResp.data?.Url;
     console.log(`Successfully created topic with ID: ${topicId}`);
     console.log(`Persistent D2L Image URL is: ${d2lImageUrl}`);
+
+    // ======= CHANGE: Store new image details in MongoDB after upload =======
+    await ImageUploadModel.create({
+      imageId,
+      mayoUrl: decodedImageUrl,
+      d2lImageUrl,
+      title,
+      altText,
+      createdAt: new Date(),
+    });
+    // ======= END CHANGE =======
 
     // --- Step 4: HTML output and Deep Linking ---
     let htmlAttrs = `height="auto" width="600px" src="${d2lImageUrl}"`;
